@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "atomic.h"
+
 struct mc_package {
 	int reference;
 	uint32_t size;
@@ -58,18 +60,6 @@ mc_packremote(lua_State *L) {
 	return pack(L, msg, size);
 }
 
-static int
-mc_packstring(lua_State *L) {
-	size_t size;
-	const char * msg = luaL_checklstring(L, 1, &size);
-	if (size != (uint32_t)size) {
-		return luaL_error(L, "string is too long");
-	}
-	void * data = skynet_malloc(size);
-	memcpy(data, msg, size);
-	return pack(L, data, size);
-}
-
 /*
 	lightuserdata struct mc_package **
 	integer size (must be sizeof(struct mc_package *)
@@ -80,7 +70,7 @@ static int
 mc_unpacklocal(lua_State *L) {
 	struct mc_package ** pack = lua_touserdata(L,1);
 	int sz = luaL_checkinteger(L,2);
-	if (sz != sizeof(*pack)) {
+	if (sz != sizeof(pack)) {
 		return luaL_error(L, "Invalid multicast package size %d", sz);
 	}
 	lua_pushlightuserdata(L, *pack);
@@ -106,6 +96,8 @@ mc_bindrefer(lua_State *L) {
 
 	lua_pushlightuserdata(L, *pack);
 
+	skynet_free(pack);
+
 	return 1;
 }
 
@@ -116,7 +108,7 @@ static int
 mc_closelocal(lua_State *L) {
 	struct mc_package *pack = lua_touserdata(L,1);
 
-	int ref = __sync_sub_and_fetch(&pack->reference, 1);
+	int ref = ATOM_DEC(&pack->reference);
 	if (ref <= 0) {
 		skynet_free(pack->data);
 		skynet_free(pack);
@@ -159,7 +151,6 @@ luaopen_multicast_core(lua_State *L) {
 		{ "bind", mc_bindrefer },
 		{ "close", mc_closelocal },
 		{ "remote", mc_remote },
-		{ "packstring", mc_packstring },
 		{ "packremote", mc_packremote },
 		{ "nextid", mc_nextid },
 		{ NULL, NULL },
